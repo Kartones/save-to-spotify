@@ -15,17 +15,18 @@ import (
 )
 
 const (
-	ClientID             = "76764a523fed47e381243dc19dee5804"
-	AuthURL              = "https://accounts.spotify.com/authorize"
-	RedirectURI          = "http://127.0.0.1:%d/callback"
-	RedirectPort         = 8085
-	EnvVarAuthToken      = "SAVE_TO_SPOTIFY_AUTH_TOKEN"
-	EnvVarBackendURL     = "SAVE_TO_SPOTIFY_BACKEND_URL"
-	EnvVarTimeout        = "SAVE_TO_SPOTIFY_TIMEOUT"
-	EnvVarClientID       = "SAVE_TO_SPOTIFY_CLIENT_ID"
-	EnvVarNoUpdateCheck  = "SAVE_TO_SPOTIFY_NO_UPDATE_CHECK"
-	EnvVarReleasesAPIURL = "SAVE_TO_SPOTIFY_RELEASES_API_URL"
-	EnvVarHeaders        = "SAVE_TO_SPOTIFY_HEADERS"
+	ClientID                = "76764a523fed47e381243dc19dee5804"
+	AuthURL                 = "https://accounts.spotify.com/authorize"
+	RedirectURI             = "http://127.0.0.1:%d/callback"
+	RedirectPort            = 8085
+	EnvVarAuthToken         = "SAVE_TO_SPOTIFY_AUTH_TOKEN"
+	EnvVarBackendURL        = "SAVE_TO_SPOTIFY_BACKEND_URL"
+	EnvVarTimeout           = "SAVE_TO_SPOTIFY_TIMEOUT"
+	EnvVarClientID          = "SAVE_TO_SPOTIFY_CLIENT_ID"
+	EnvVarNoUpdateCheck     = "SAVE_TO_SPOTIFY_NO_UPDATE_CHECK"
+	EnvVarReleasesAPIURL    = "SAVE_TO_SPOTIFY_RELEASES_API_URL"
+	EnvVarGitHubReleasesURL = "SAVE_TO_SPOTIFY_GITHUB_RELEASES_URL"
+	EnvVarHeaders           = "SAVE_TO_SPOTIFY_HEADERS"
 
 	Scopes = "sts-content-management"
 
@@ -41,7 +42,11 @@ var AllowedMediaExtensions = map[string]bool{
 
 var BackendBaseURL = getBackendBaseURL()
 
-// ReleasesAPIURL is the full URL for fetching the latest release version.
+// GitHubReleasesURL is the GitHub Releases API URL for checking the latest CLI version.
+var GitHubReleasesURL = getGitHubReleasesURL()
+
+// ReleasesAPIURL is the backend URL for fetching the latest release version,
+// used as a fallback when the GitHub check fails.
 // Defaults to the backend service endpoint; override via SAVE_TO_SPOTIFY_RELEASES_API_URL.
 var ReleasesAPIURL = getReleasesAPIURL()
 
@@ -50,6 +55,13 @@ func getBackendBaseURL() string {
 		return u
 	}
 	return "https://saveto.spotify.com"
+}
+
+func getGitHubReleasesURL() string {
+	if u := os.Getenv(EnvVarGitHubReleasesURL); u != "" {
+		return u
+	}
+	return "https://api.github.com/repos/spotify/save-to-spotify/releases/latest"
 }
 
 func getReleasesAPIURL() string {

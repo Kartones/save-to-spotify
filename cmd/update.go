@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/spotify/save-to-spotify/config"
+	"github.com/spotify/save-to-spotify/internal/httpx"
 )
 
 var (
@@ -125,6 +126,83 @@ func handleUpdate(args []string) error {
 }
 
 func fetchLatestVersion() (latestReleaseResponse, error) {
+	release, ghErr := fetchFromGitHub()
+	if ghErr == nil {
+		return release, nil
+	}
+
+	release, err := fetchFromBackend()
+	if err != nil {
+		return latestReleaseResponse{}, errors.Join(ghErr, err)
+	}
+	return release, nil
+}
+
+type githubRelease struct {
+	TagName string        `json:"tag_name"`
+	Assets  []githubAsset `json:"assets"`
+}
+
+type githubAsset struct {
+	Name               string `json:"name"`
+	BrowserDownloadURL string `json:"browser_download_url"`
+}
+
+func fetchFromGitHub() (latestReleaseResponse, error) {
+	req, err := http.NewRequestWithContext(
+		context.Background(),
+		http.MethodGet,
+		config.GitHubReleasesURL,
+		nil,
+	)
+	if err != nil {
+		return latestReleaseResponse{}, fmt.Errorf("failed to create GitHub request: %w", err)
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+
+	resp, err := (&http.Client{
+		Timeout:   releaseMetadataTimeout,
+		Transport: httpx.UserAgentTransport{UserAgent: cliUserAgent()},
+	}).Do(req)
+	if err != nil {
+		return latestReleaseResponse{}, fmt.Errorf("failed to fetch from GitHub: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if !isSuccessStatus(resp.StatusCode) {
+		return latestReleaseResponse{}, fmt.Errorf("GitHub update check failed: status %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
+	if err != nil {
+		return latestReleaseResponse{}, fmt.Errorf("failed to read GitHub response: %w", err)
+	}
+
+	var gh githubRelease
+	if err := json.Unmarshal(body, &gh); err != nil {
+		return latestReleaseResponse{}, fmt.Errorf("failed to parse GitHub response: %w", err)
+	}
+
+	latest, err := validatedVersion(gh.TagName)
+	if err != nil {
+		return latestReleaseResponse{}, fmt.Errorf("invalid GitHub release version: %w", err)
+	}
+
+	var assetURL string
+	if baseName, err := currentBinaryAssetName(); err == nil {
+		assetName := fmt.Sprintf("%s-v%s.zip", baseName, latest)
+		for _, a := range gh.Assets {
+			if a.Name == assetName {
+				assetURL = a.BrowserDownloadURL
+				break
+			}
+		}
+	}
+
+	return latestReleaseResponse{Version: latest, AssetURL: assetURL}, nil
+}
+
+func fetchFromBackend() (latestReleaseResponse, error) {
 	token, err := getValidToken()
 	if err != nil {
 		return latestReleaseResponse{}, fmt.Errorf("failed to get auth token for update check: %w", err)
@@ -168,14 +246,10 @@ func fetchLatestVersion() (latestReleaseResponse, error) {
 		return latestReleaseResponse{}, fmt.Errorf("failed to parse latest version response")
 	}
 
-	latest := normalizeVersion(payload.Version)
-	if latest == "" {
+	latest, err := validatedVersion(payload.Version)
+	if err != nil {
 		return latestReleaseResponse{}, fmt.Errorf("failed to parse latest version response")
 	}
-	if _, err := parseVersion(latest); err != nil {
-		return latestReleaseResponse{}, fmt.Errorf("failed to parse latest version response")
-	}
-
 	payload.Version = latest
 	return payload, nil
 }
@@ -291,6 +365,14 @@ func normalizeVersion(v string) string {
 	return strings.TrimPrefix(strings.TrimSpace(v), "v")
 }
 
+func validatedVersion(raw string) (string, error) {
+	v := normalizeVersion(raw)
+	if _, err := parseVersion(v); err != nil {
+		return "", err
+	}
+	return v, nil
+}
+
 func compareInts(a, b int) int {
 	switch {
 	case a < b:
@@ -319,7 +401,7 @@ func downloadUpdate(release latestReleaseResponse) error {
 		return err
 	}
 	if release.AssetURL == "" {
-		return fmt.Errorf("update failed: backend did not supply an asset URL")
+		return fmt.Errorf("update failed: release did not include an asset URL for %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
 
 	info("Downloading v%s (%s-%s)...\n", release.Version, runtime.GOOS, runtime.GOARCH)
