@@ -55,6 +55,7 @@ jobs:
             fi
           done
           ./dist/save-to-spotify-darwin-arm64 --version
+          arch -x86_64 ./dist/save-to-spotify-darwin-amd64 --version
 
       - name: Package binaries with agent skill
         run: |
